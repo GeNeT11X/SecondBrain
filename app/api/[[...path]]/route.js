@@ -23,44 +23,161 @@ async function connectDB() {
 // Parse ChatGPT share link and extract conversation
 async function parseChatGPTLink(url) {
     try {
-        const response = await fetch(url);
-        const html = await response.text();
-        const $ = cheerio.load(html);
+        // Strategy 1: Use ChatGPT's public backend share API
+        // e.g. https://chatgpt.com/share/abc123 -> share ID is "abc123"
+        const shareIdMatch = url.match(/(?:chatgpt\.com|chat\.openai\.com)\/share\/([a-zA-Z0-9_-]+)/);
+        if (shareIdMatch) {
+            const shareId = shareIdMatch[1];
+            const apiUrl = `https://chatgpt.com/backend-api/share/${shareId}`;
+            try {
+                const apiResponse = await fetch(apiUrl, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': 'application/json',
+                    }
+                });
+                if (apiResponse.ok) {
+                    const shareData = await apiResponse.json();
+                    const mapping = shareData?.linear_conversation || shareData?.mapping;
+                    const messages = [];
 
-        // Try to extract from __NEXT_DATA__ script tag
-        const scriptTag = $('script#__NEXT_DATA__').html();
-        if (scriptTag) {
-            const data = JSON.parse(scriptTag);
-            const serverData = data?.props?.pageProps?.serverResponse?.data;
-
-            if (serverData) {
-                const mapping = serverData.mapping || {};
-                const messages = [];
-
-                Object.values(mapping).forEach(node => {
-                    if (node.message && node.message.content) {
-                        const content = node.message.content;
-                        const role = node.message.author?.role || 'unknown';
-
-                        if (content.parts && content.parts.length > 0) {
-                            const text = content.parts.join('\n');
-                            if (text.trim()) {
+                    if (Array.isArray(mapping)) {
+                        // linear_conversation is an ordered array
+                        for (const node of mapping) {
+                            const msg = node?.message;
+                            if (!msg || !msg.content) continue;
+                            const role = msg.author?.role;
+                            if (!role || role === 'system' || role === 'tool') continue;
+                            const parts = msg.content?.parts || [];
+                            const text = parts.filter(p => typeof p === 'string').join('\n').trim();
+                            if (text) {
                                 messages.push({
                                     role: role === 'user' ? 'user' : 'assistant',
                                     content: text
                                 });
                             }
                         }
+                    } else if (mapping && typeof mapping === 'object') {
+                        // mapping is a keyed object; use current_node to walk the chain
+                        const walk = (nodeId, visited = new Set()) => {
+                            if (!nodeId || visited.has(nodeId)) return;
+                            visited.add(nodeId);
+                            const node = mapping[nodeId];
+                            if (!node) return;
+                            // Walk children first to build ordered list
+                            const parent = node.parent;
+                            walk(parent, visited);
+                        };
+                        Object.values(mapping).forEach(node => {
+                            const msg = node?.message;
+                            if (!msg || !msg.content) return;
+                            const role = msg.author?.role;
+                            if (!role || role === 'system' || role === 'tool') return;
+                            const parts = msg.content?.parts || [];
+                            const text = parts.filter(p => typeof p === 'string').join('\n').trim();
+                            if (text) {
+                                messages.push({
+                                    role: role === 'user' ? 'user' : 'assistant',
+                                    content: text
+                                });
+                            }
+                        });
                     }
-                });
 
-                return messages;
+                    if (messages.length > 0) return messages;
+                }
+            } catch (apiErr) {
+                console.warn('Backend API strategy failed, falling back to HTML parsing:', apiErr.message);
             }
         }
 
-        // Fallback: try to extract from HTML
+        // Strategy 2: Fetch HTML and parse __NEXT_DATA__ script tag
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
+        });
+        const html = await response.text();
+        const $ = cheerio.load(html);
+
+        // __NEXT_DATA__ approach (older ChatGPT versions)
+        const scriptTag = $('script#__NEXT_DATA__').html();
+        if (scriptTag) {
+            try {
+                const data = JSON.parse(scriptTag);
+                const serverData = data?.props?.pageProps?.serverResponse?.data;
+                if (serverData) {
+                    const mapping = serverData.mapping || {};
+                    const messages = [];
+                    Object.values(mapping).forEach(node => {
+                        if (node.message && node.message.content) {
+                            const content = node.message.content;
+                            const role = node.message.author?.role || 'unknown';
+                            if (role === 'system' || role === 'tool') return;
+                            if (content.parts && content.parts.length > 0) {
+                                const text = content.parts
+                                    .filter(p => typeof p === 'string')
+                                    .join('\n')
+                                    .trim();
+                                if (text) {
+                                    messages.push({
+                                        role: role === 'user' ? 'user' : 'assistant',
+                                        content: text
+                                    });
+                                }
+                            }
+                        }
+                    });
+                    if (messages.length > 0) return messages;
+                }
+            } catch (parseErr) {
+                console.warn('__NEXT_DATA__ parse failed:', parseErr.message);
+            }
+        }
+
+        // Strategy 3: Try inline JSON embedded in any <script> tag
+        const inlineScripts = $('script[type="application/json"], script:not([src])');
+        let foundFromScript = null;
+        inlineScripts.each((_, el) => {
+            if (foundFromScript) return;
+            try {
+                const content = $(el).html();
+                if (!content || !content.includes('"mapping"')) return;
+                const data = JSON.parse(content);
+                const mapping = data?.mapping || data?.props?.pageProps?.serverResponse?.data?.mapping;
+                if (!mapping) return;
+                const messages = [];
+                Object.values(mapping).forEach(node => {
+                    const msg = node?.message;
+                    if (!msg || !msg.content) return;
+                    const role = msg.author?.role;
+                    if (!role || role === 'system' || role === 'tool') return;
+                    const parts = msg.content?.parts || [];
+                    const text = parts.filter(p => typeof p === 'string').join('\n').trim();
+                    if (text) messages.push({ role: role === 'user' ? 'user' : 'assistant', content: text });
+                });
+                if (messages.length > 0) foundFromScript = messages;
+            } catch (_) { /* skip */ }
+        });
+        if (foundFromScript) return foundFromScript;
+
+        // Strategy 4: Modern HTML selectors for ChatGPT share pages
         const conversation = [];
-        $('.min-h-\\[20px\\]').each((i, elem) => {
+
+        // Try data-message-author-role attributes (current ChatGPT DOM)
+        $('[data-message-author-role]').each((_, elem) => {
+            const role = $(elem).attr('data-message-author-role');
+            const text = $(elem).text().trim();
+            if (text && (role === 'user' || role === 'assistant')) {
+                conversation.push({ role, content: text });
+            }
+        });
+        if (conversation.length > 0) return conversation;
+
+        // Try article elements
+        $('article').each((i, elem) => {
             const text = $(elem).text().trim();
             if (text) {
                 conversation.push({
@@ -69,11 +186,18 @@ async function parseChatGPTLink(url) {
                 });
             }
         });
+        if (conversation.length > 0) return conversation;
 
-        return conversation.length > 0 ? conversation : null;
+        // Last resort: grab any visible text content and treat as a single assistant message
+        const pageText = $('body').text().replace(/\s+/g, ' ').trim();
+        if (pageText && pageText.length > 100) {
+            return [{ role: 'assistant', content: pageText.slice(0, 8000) }];
+        }
+
+        return null;
     } catch (error) {
         console.error('Error parsing ChatGPT link:', error);
-        throw new Error('Failed to parse ChatGPT link. Please ensure the link is a valid shared conversation.');
+        throw new Error('Failed to parse ChatGPT link. Please ensure the link is a valid public shared conversation.');
     }
 }
 
@@ -145,7 +269,9 @@ export async function POST(request) {
             // Parse conversation
             const messages = await parseChatGPTLink(chatUrl);
             if (!messages || messages.length === 0) {
-                return NextResponse.json({ error: 'Could not extract conversation from URL' }, { status: 400 });
+                return NextResponse.json({
+                    error: 'Could not extract conversation from this link. Make sure the ChatGPT conversation is shared publicly (set to "Anyone with the link") and the link is valid.'
+                }, { status: 400 });
             }
 
             // Analyze with AI
