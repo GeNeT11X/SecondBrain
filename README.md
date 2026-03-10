@@ -2,34 +2,9 @@
 
 A production-ready SaaS application that helps you organize, summarize, and search your ChatGPT conversations automatically. Build your personal knowledge base from your AI chats.
 
-## 🎯 Features
-
-### Core Features
-- **🔗 ChatGPT Link Parser**: Paste any ChatGPT share link and automatically extract the full conversation
-- **🤖 AI-Powered Analysis**: Uses GPT-4-turbo to generate:
-  - Intelligent titles
-  - Comprehensive summaries
-  - Key insights extraction
-  - Automatic tagging
-  - Code snippet detection
-- **🔍 Dual Search System**:
-  - **Keyword Search**: Traditional text-based search
-  - **Semantic Search**: AI-powered meaning-based search using embeddings
-- **🏷️ Smart Organization**: Tag-based filtering and categorization
-- **💾 Persistent Storage**: MongoDB database for reliable data storage
-- **🎨 Beautiful UI**: Modern glassmorphic design with smooth animations
-
-### Technical Features
-- Vector embeddings for semantic search (OpenAI text-embedding-3-small)
-- Cosine similarity matching for relevant results
-- Responsive design with Tailwind CSS
-- Server-side rendering with Next.js 14
-- RESTful API architecture
-
-## 🚀 Getting Started
 
 ### Prerequisites
-- OpenAI API key (for GPT-4 and embeddings)
+
 - MongoDB instance (local or cloud)
 
 ### Installation
