@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
     Archive, Search, Plus, Calendar, Loader2, MessageSquare, X,
@@ -102,11 +101,12 @@ function MessageBubble({ msg }) {
                 ${isUser ? 'bg-gradient-to-br from-blue-500 to-indigo-600' : 'bg-gradient-to-br from-slate-600 to-slate-700'}`}>
                 {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
             </div>
-            {/* Bubble */}
-            <div className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words
+            {/* Bubble — max-w-[85%] to show more of long AI replies */}
+            <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap
                 ${isUser
                     ? 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-tr-sm'
-                    : 'bg-white/8 border border-white/10 text-slate-200 rounded-tl-sm'}`}>
+                    : 'bg-white/8 border border-white/10 text-slate-200 rounded-tl-sm'}`}
+                style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                 {msg.content}
                 <div className={`text-xs mt-1.5 ${isUser ? 'text-blue-200/60' : 'text-slate-500'}`}>
                     <Clock className="h-2.5 w-2.5 inline mr-1" />
@@ -136,13 +136,40 @@ function ConversationDialog({ conv, onClose, onToggleImportant, onDelete }) {
 
     return (
         <Dialog open={!!conv} onOpenChange={onClose}>
-            <DialogContent className="max-w-3xl max-h-[90vh] bg-gradient-to-br from-slate-900 to-slate-950 border-white/20 text-white flex flex-col p-0">
-                {/* Header */}
-                <DialogHeader className="px-6 pt-6 pb-4 border-b border-white/10 shrink-0">
-                    <div className="flex items-start justify-between gap-3">
+            {/*
+             * IMPORTANT layout notes:
+             * - DialogContent is flex flex-col with max-h-[90vh]
+             * - Header is shrink-0 so it never collapses
+             * - The messages div is min-h-0 + overflow-y-auto so it fills
+             *   the remaining space and scrolls the full chat content
+             * - We use a native div instead of ScrollArea because Radix
+             *   ScrollArea requires an explicit height ancestor to function;
+             *   a plain overflow-y-auto div always works in a flex column
+             */}
+            <DialogContent className="!fixed !inset-0 !left-0 !top-0 !translate-x-0 !translate-y-0 w-screen h-screen max-w-none !rounded-none bg-gradient-to-br from-slate-900 to-slate-950 border-0 text-white flex flex-col p-0">
+                {/* Header — fixed height, never shrinks.
+                    pr-14 reserves space so content doesn't slide under the
+                    Radix close (X) button which is absolute right-4 top-4. */}
+                <DialogHeader className="px-6 pr-14 pt-5 pb-4 border-b border-white/10 shrink-0">
+                    <div className="flex items-center gap-4">
+
+                        {/* ── LEFT: danger zone — delete is isolated on its own ── */}
+                        <button
+                            onClick={() => { onDelete(conv.id); onClose(); }}
+                            title="Delete conversation"
+                            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 transition-all text-xs font-medium"
+                        >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Delete</span>
+                        </button>
+
+                        {/* thin divider */}
+                        <div className="w-px h-8 bg-white/10 shrink-0" />
+
+                        {/* ── MIDDLE: title + meta ── */}
                         <div className="flex-1 min-w-0">
-                            <DialogTitle className="text-xl font-bold text-white line-clamp-2">{conv.title}</DialogTitle>
-                            <DialogDescription className="flex flex-wrap items-center gap-3 mt-1 text-xs text-slate-400">
+                            <DialogTitle className="text-lg font-bold text-white leading-snug truncate">{conv.title}</DialogTitle>
+                            <DialogDescription className="flex flex-wrap items-center gap-3 mt-0.5 text-xs text-slate-400">
                                 <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{formatDateTime(conv.createdAt)}</span>
                                 <span className="flex items-center gap-1"><MessageSquare className="h-3 w-3" />{conv.messageCount} messages</span>
                                 <a href={conv.sourceUrl} target="_blank" rel="noopener noreferrer"
@@ -151,41 +178,36 @@ function ConversationDialog({ conv, onClose, onToggleImportant, onDelete }) {
                                 </a>
                             </DialogDescription>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                            <button
-                                onClick={() => onToggleImportant(conv.id)}
-                                className={`p-2 rounded-lg border transition-all ${conv.isImportant
-                                    ? 'bg-amber-400/20 text-amber-400 border-amber-400/30'
-                                    : 'bg-white/5 text-slate-400 border-white/10 hover:text-amber-400'}`}
-                            >
-                                <Star className={`h-4 w-4 ${conv.isImportant ? 'fill-amber-400' : ''}`} />
-                            </button>
-                            <button
-                                onClick={() => { onDelete(conv.id); onClose(); }}
-                                className="p-2 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                            >
-                                <Trash2 className="h-4 w-4" />
-                            </button>
-                        </div>
+
+                        {/* ── RIGHT: star only — close (X) sits further right via Radix absolute */}
+                        <button
+                            onClick={() => onToggleImportant(conv.id)}
+                            title={conv.isImportant ? 'Unmark important' : 'Mark important'}
+                            className={`shrink-0 p-2 rounded-lg border transition-all ${conv.isImportant
+                                ? 'bg-amber-400/20 text-amber-400 border-amber-400/30'
+                                : 'bg-white/5 text-slate-400 border-white/10 hover:text-amber-400 hover:bg-amber-400/10'}`}
+                        >
+                            <Star className={`h-4 w-4 ${conv.isImportant ? 'fill-amber-400' : ''}`} />
+                        </button>
+
                     </div>
                 </DialogHeader>
 
-                {/* Messages */}
-                <ScrollArea className="flex-1 px-6 py-4">
+                {/* Messages — min-h-0 lets this div shrink below its content
+                    size so overflow-y-auto can kick in and make it scrollable */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4 scroll-smooth">
                     {loading ? (
                         <div className="flex items-center justify-center py-16">
                             <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
                         </div>
                     ) : messages && messages.length > 0 ? (
-                        <div className="space-y-4">
-                            {messages.map((msg, i) => (
-                                <MessageBubble key={msg.id || i} msg={msg} />
-                            ))}
-                        </div>
+                        messages.map((msg, i) => (
+                            <MessageBubble key={msg.id || i} msg={msg} />
+                        ))
                     ) : (
                         <div className="text-center py-16 text-slate-500">No messages found</div>
                     )}
-                </ScrollArea>
+                </div>
             </DialogContent>
         </Dialog>
     );
