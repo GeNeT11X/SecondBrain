@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { ClerkUserButton, ClerkSignInButton } from '@/components/clerk-user-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -361,7 +362,7 @@ export default function App() {
 
             <Toaster />
 
-            {/* Header */}
+            {/* ── Header ── */}
             <header className="relative border-b border-white/10 bg-black/30 backdrop-blur-xl sticky top-0 z-50">
                 <div className="container mx-auto px-4 py-4">
                     <div className="flex items-center justify-between">
@@ -374,14 +375,19 @@ export default function App() {
                             </div>
                             <div>
                                 <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
-                                    ChatGPT Vault
+                                    SecondBrain
                                 </h1>
                                 <p className="text-xs text-slate-400">Your personal conversation archive</p>
                             </div>
                         </div>
-                        <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10">
-                            <BookMarked className="h-4 w-4 text-blue-400" />
-                            <span className="text-sm font-medium text-white">{conversations.length} saved</span>
+                        <div className="flex items-center gap-3">
+                            <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10">
+                                <BookMarked className="h-4 w-4 text-blue-400" />
+                                <span className="text-sm font-medium text-white">{conversations.length} saved</span>
+                            </div>
+                            {/* Auth buttons from isolated Clerk client boundary */}
+                            <ClerkSignInButton />
+                            <ClerkUserButton />
                         </div>
                     </div>
                 </div>
@@ -398,7 +404,7 @@ export default function App() {
                         <h2 className="text-xl font-bold text-white">Save a Conversation</h2>
                     </div>
                     <p className="text-slate-400 text-sm mb-5">
-                        Paste a public ChatGPT share link. The conversation will be archived exactly as-is — no AI processing.
+                        Paste a public ChatGPT interaction link. The conversation will be archived exactly as it is with zero alterations.
                     </p>
                     <div className="flex flex-col sm:flex-row gap-3">
                         <div className="relative flex-1 group">

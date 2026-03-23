@@ -2,9 +2,17 @@ import { NextResponse } from 'next/server';
 import { MongoClient } from 'mongodb';
 import * as cheerio from 'cheerio';
 import { v4 as uuidv4 } from 'uuid';
+import { auth } from '@clerk/nextjs/server';
 
 // ─── MongoDB ───────────────────────────────────────────────────────────────────
-const client = new MongoClient(process.env.MONGO_URL);
+// Supports both local MONGO_URL and production MONGODB_URI (Atlas)
+const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
+// Serverless-friendly connection options (short timeouts, small pool)
+const client = new MongoClient(MONGO_URI, {
+    serverSelectionTimeoutMS: 5000,
+    connectTimeoutMS: 5000,
+    maxPoolSize: 10,
+});
 const dbName = process.env.DB_NAME || 'ai_second_brain';
 let db;
 
@@ -12,7 +20,6 @@ async function connectDB() {
     if (!db) {
         await client.connect();
         db = client.db(dbName);
-        // Ensure indexes exist
         await db.collection('conversations').createIndex({ userId: 1, createdAt: -1 });
         await db.collection('conversations').createIndex({ userId: 1, isImportant: 1 });
         await db.collection('messages').createIndex({ conversationId: 1, messageOrder: 1 });
@@ -20,11 +27,49 @@ async function connectDB() {
     return db;
 }
 
+// ─── Auth helper ──────────────────────────────────────────────────────────────
+const HAS_CLERK = !!(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY &&
+    process.env.CLERK_SECRET_KEY
+);
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+async function requireAuth() {
+    // No Clerk keys → local dev only, use fixed userId
+    if (!HAS_CLERK) return IS_PROD ? null : 'local-user';
+    try {
+        const { userId } = await auth();
+        if (userId) return userId;
+        // In production, enforce real authentication — no anonymous fallback
+        if (IS_PROD) return null;
+        return 'local-user';
+    } catch {
+        return IS_PROD ? null : 'local-user';
+    }
+}
+
+// ─── Rate Limiter (in-memory, per serverless instance) ────────────────────────
+// Prevents abuse of the save-chat endpoint. Max 10 requests per minute per user.
+const rateLimitMap = new Map();
+function checkRateLimit(userId) {
+    const now = Date.now();
+    const windowMs = 60_000;
+    const max = 10;
+    const entry = rateLimitMap.get(userId) || { count: 0, start: now };
+    if (now - entry.start > windowMs) {
+        rateLimitMap.set(userId, { count: 1, start: now });
+        return true;
+    }
+    if (entry.count >= max) return false;
+    entry.count++;
+    rateLimitMap.set(userId, entry);
+    return true;
+}
+
 // ─── Chat Fetching ─────────────────────────────────────────────────────────────
 
 /** Extract share ID from any supported ChatGPT share URL format */
 function extractShareId(url) {
-    // Handles: chatgpt.com/share/abc123 and chatgpt.com/share/e/abc123
     const match = url.match(/(?:chatgpt\.com|chat\.openai\.com)\/share\/(?:e\/)?([a-zA-Z0-9_-]+)/);
     return match ? match[1] : null;
 }
@@ -65,10 +110,7 @@ function parseMappingToMessages(mapping) {
         let text = '';
         const parts = msg.content?.parts || [];
         if (parts.length > 0) {
-            text = parts
-                .filter(p => typeof p === 'string')
-                .join('\n')
-                .trim();
+            text = parts.filter(p => typeof p === 'string').join('\n').trim();
         } else if (typeof msg.content?.text === 'string') {
             text = msg.content.text.trim();
         }
@@ -108,7 +150,6 @@ async function fetchRawMessages(url) {
     console.log(`[save-chat] Fetching share URL: ${url}, extractedId: ${shareId}`);
 
     // ── Strategy 1: ChatGPT share JSON API endpoints ──────────────────────────
-    // Try multiple endpoints — backend-anon is the unauthenticated public share API
     if (shareId) {
         const endpoints = [
             `https://chatgpt.com/backend-anon/share/${shareId}`,
@@ -119,11 +160,7 @@ async function fetchRawMessages(url) {
             try {
                 console.log(`[save-chat] Trying API endpoint: ${endpoint}`);
                 const resp = await fetch(endpoint, {
-                    headers: {
-                        ...BROWSER_HEADERS,
-                        'Accept': 'application/json',
-                        'Referer': `https://chatgpt.com/share/${shareId}`,
-                    },
+                    headers: { ...BROWSER_HEADERS, 'Accept': 'application/json', 'Referer': `https://chatgpt.com/share/${shareId}` },
                     redirect: 'follow',
                 });
                 console.log(`[save-chat] API response status: ${resp.status}`);
@@ -159,12 +196,11 @@ async function fetchRawMessages(url) {
     if (html) {
         const $ = cheerio.load(html);
 
-        // Strategy 2a: __NEXT_DATA__ script tag (multiple path variations)
+        // Strategy 2a: __NEXT_DATA__ script tag
         const nextDataRaw = $('script#__NEXT_DATA__').html();
         if (nextDataRaw) {
             try {
                 const nextData = JSON.parse(nextDataRaw);
-                // Try all known pageProps paths for different ChatGPT frontend versions
                 const candidatePaths = [
                     nextData?.props?.pageProps?.serverResponse?.data?.mapping,
                     nextData?.props?.pageProps?.data?.mapping,
@@ -184,7 +220,6 @@ async function fetchRawMessages(url) {
                         }
                     }
                 }
-                // Deep recursive search as last resort
                 const deepMapping = deepFindMapping(nextData);
                 if (deepMapping) {
                     const messages = parseMappingToMessages(deepMapping);
@@ -200,22 +235,17 @@ async function fetchRawMessages(url) {
             console.log('[save-chat] No __NEXT_DATA__ script tag found in HTML');
         }
 
-        // Strategy 2b: React Router v7 / Remix RSC streaming format (ChatGPT's current format)
-        // ChatGPT now uses: streamController.enqueue(new TextEncoder().encode("0:{...json...}"))
-        // The conversation data is base64 or string-embedded in these enqueue() calls
+        // Strategy 2b: React Router v7 RSC streaming format + inline script scanning
         const allScripts = $('script').toArray();
         for (const script of allScripts) {
-            if ($(script).attr('src')) continue; // skip external scripts
+            if ($(script).attr('src')) continue;
             const scriptText = $(script).html() || '';
 
-            // Look for React Router RSC streaming payload — data chunks encoded as strings
-            // Pattern: encode("0:{\"linear_conversation\":[...],...}") or similar
+            // RSC streaming encode("0:{...json...}") pattern
             const encodeMatches = scriptText.match(/encode\("((?:[^"\\]|\\.)*)"\)/g) || [];
             for (const match of encodeMatches) {
                 try {
-                    // Unescape the string inside encode("...")
                     const inner = match.slice(8, -2).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-                    // RSC format: "0:{json}" or "1:{json}" etc.
                     const jsonStr = inner.replace(/^\d+:/, '');
                     const parsed = JSON.parse(jsonStr);
                     const deepMapping = deepFindMapping(parsed);
@@ -226,10 +256,9 @@ async function fetchRawMessages(url) {
                             return messages;
                         }
                     }
-                } catch (_) { /* skip invalid */ }
+                } catch (_) { }
             }
 
-            // Also scan for any JSON objects in scripts containing conversation keywords
             if (!scriptText.includes('linear_conversation') && !scriptText.includes('"mapping"')) continue;
             const jsonChunks = scriptText.match(/\{[^<]{50,}\}/gs) || [];
             for (const chunk of jsonChunks) {
@@ -243,11 +272,11 @@ async function fetchRawMessages(url) {
                             return messages;
                         }
                     }
-                } catch (_) { /* not valid JSON, skip */ }
+                } catch (_) { }
             }
         }
 
-        // Strategy 3: data-message-author-role attributes (server-rendered HTML fallback)
+        // Strategy 3: data-message-author-role attributes
         const domMessages = [];
         let order = 0;
         $('[data-message-author-role]').each((_, elem) => {
@@ -262,17 +291,12 @@ async function fetchRawMessages(url) {
             return domMessages;
         }
 
-        // Strategy 4: article elements (last resort)
+        // Strategy 4: article elements
         const articleMessages = [];
         $('article').each((i, elem) => {
             const text = $(elem).text().trim();
             if (text) {
-                articleMessages.push({
-                    role: i % 2 === 0 ? 'user' : 'assistant',
-                    content: text,
-                    messageOrder: i,
-                    createdAt: new Date().toISOString()
-                });
+                articleMessages.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: text, messageOrder: i, createdAt: new Date().toISOString() });
             }
         });
         if (articleMessages.length > 0) {
@@ -287,7 +311,6 @@ async function fetchRawMessages(url) {
     return null;
 }
 
-// Derive a title from the first user message (no LLM)
 function deriveTitle(messages) {
     const first = messages.find(m => m.role === 'user');
     if (!first) return 'Untitled Conversation';
@@ -297,12 +320,19 @@ function deriveTitle(messages) {
 // ─── POST handlers ─────────────────────────────────────────────────────────────
 export async function POST(request) {
     try {
+        const userId = await requireAuth();
+        if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
         const url = new URL(request.url);
         const path = url.pathname.replace('/api/', '');
         const db = await connectDB();
 
-        // POST /api/save-chat
         if (path === 'save-chat') {
+            // Rate limit: max 10 saves per minute per user
+            if (!checkRateLimit(userId)) {
+                return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 });
+            }
+
             const body = await request.json();
             const { chatUrl } = body;
 
@@ -321,10 +351,9 @@ export async function POST(request) {
             const title = deriveTitle(rawMessages);
             const now = new Date().toISOString();
 
-            // Insert conversation record
             const conversation = {
                 id: conversationId,
-                userId: 'default_user',
+                userId,                  // ← real Clerk userId
                 title,
                 sourceUrl: chatUrl,
                 isImportant: false,
@@ -333,12 +362,11 @@ export async function POST(request) {
             };
             await db.collection('conversations').insertOne(conversation);
 
-            // Insert raw messages (exact content, no modification)
             const messageDocs = rawMessages.map(m => ({
                 id: uuidv4(),
                 conversationId,
                 role: m.role,
-                content: m.content,           // exact, unmodified
+                content: m.content,
                 messageOrder: m.messageOrder,
                 createdAt: m.createdAt || now,
             }));
@@ -358,11 +386,13 @@ export async function POST(request) {
 // ─── GET handlers ──────────────────────────────────────────────────────────────
 export async function GET(request) {
     try {
+        const userId = await requireAuth();
+        if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
         const url = new URL(request.url);
         const path = url.pathname.replace('/api/', '');
         const db = await connectDB();
 
-        // GET /api/conversations  — paginated list
         if (path === 'conversations' || path === '') {
             const page = parseInt(url.searchParams.get('page') || '1');
             const limit = parseInt(url.searchParams.get('limit') || '20');
@@ -370,62 +400,48 @@ export async function GET(request) {
 
             const [conversations, total] = await Promise.all([
                 db.collection('conversations')
-                    .find({ userId: 'default_user' })
+                    .find({ userId })
                     .sort({ createdAt: -1 })
                     .skip(skip)
                     .limit(limit)
                     .toArray(),
-                db.collection('conversations').countDocuments({ userId: 'default_user' })
+                db.collection('conversations').countDocuments({ userId })
             ]);
 
             return NextResponse.json({ conversations, total, page, limit });
         }
 
-        // GET /api/conversations/:id — full conversation with messages
         if (path.startsWith('conversations/')) {
             const convId = path.replace('conversations/', '');
             const [conversation, messages] = await Promise.all([
-                db.collection('conversations').findOne({ id: convId }),
-                db.collection('messages')
-                    .find({ conversationId: convId })
-                    .sort({ messageOrder: 1 })
-                    .toArray()
+                db.collection('conversations').findOne({ id: convId, userId }),
+                db.collection('messages').find({ conversationId: convId }).sort({ messageOrder: 1 }).toArray()
             ]);
 
             if (!conversation) {
                 return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
             }
-
             return NextResponse.json({ conversation, messages });
         }
 
-        // GET /api/search?q=keyword
         if (path === 'search') {
             const q = url.searchParams.get('q') || '';
-            if (!q.trim()) {
-                return NextResponse.json({ conversations: [] });
-            }
+            if (!q.trim()) return NextResponse.json({ conversations: [] });
 
-            // Find matching message content (exact keyword, no LLM)
             const matchingMsgs = await db.collection('messages')
                 .find({ content: { $regex: q, $options: 'i' } })
                 .toArray();
 
             const conversationIds = [...new Set(matchingMsgs.map(m => m.conversationId))];
 
-            // Also search by conversation title
             const titleMatches = await db.collection('conversations')
-                .find({
-                    userId: 'default_user',
-                    title: { $regex: q, $options: 'i' }
-                })
+                .find({ userId, title: { $regex: q, $options: 'i' } })
                 .toArray();
 
-            const titleMatchIds = titleMatches.map(c => c.id);
-            const allIds = [...new Set([...conversationIds, ...titleMatchIds])];
+            const allIds = [...new Set([...conversationIds, ...titleMatches.map(c => c.id)])];
 
             const conversations = await db.collection('conversations')
-                .find({ id: { $in: allIds } })
+                .find({ id: { $in: allIds }, userId })
                 .sort({ createdAt: -1 })
                 .toArray();
 
@@ -443,24 +459,20 @@ export async function GET(request) {
 // ─── PATCH handler ─────────────────────────────────────────────────────────────
 export async function PATCH(request) {
     try {
+        const userId = await requireAuth();
+        if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
         const url = new URL(request.url);
         const path = url.pathname.replace('/api/', '');
         const db = await connectDB();
 
-        // PATCH /api/conversations/:id/important
         if (path.match(/^conversations\/[^/]+\/important$/)) {
             const convId = path.replace('conversations/', '').replace('/important', '');
-            const conversation = await db.collection('conversations').findOne({ id: convId });
-            if (!conversation) {
-                return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
-            }
+            const conversation = await db.collection('conversations').findOne({ id: convId, userId });
+            if (!conversation) return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
 
             const newValue = !conversation.isImportant;
-            await db.collection('conversations').updateOne(
-                { id: convId },
-                { $set: { isImportant: newValue } }
-            );
-
+            await db.collection('conversations').updateOne({ id: convId, userId }, { $set: { isImportant: newValue } });
             return NextResponse.json({ success: true, isImportant: newValue });
         }
 
@@ -475,15 +487,21 @@ export async function PATCH(request) {
 // ─── DELETE handler ────────────────────────────────────────────────────────────
 export async function DELETE(request) {
     try {
+        const userId = await requireAuth();
+        if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
         const url = new URL(request.url);
         const path = url.pathname.replace('/api/', '');
         const db = await connectDB();
 
-        // DELETE /api/conversations/:id
         if (path.startsWith('conversations/')) {
             const convId = path.replace('conversations/', '');
+            // Verify ownership before deleting
+            const conversation = await db.collection('conversations').findOne({ id: convId, userId });
+            if (!conversation) return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+
             await Promise.all([
-                db.collection('conversations').deleteOne({ id: convId }),
+                db.collection('conversations').deleteOne({ id: convId, userId }),
                 db.collection('messages').deleteMany({ conversationId: convId })
             ]);
             return NextResponse.json({ success: true });

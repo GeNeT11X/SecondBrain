@@ -187,11 +187,96 @@ This is an MVP version. Contributions welcome!
 
 MIT License - feel free to use for your own projects
 
-## 🙋 Support
+---
 
-For issues or questions, please open an issue on GitHub or contact support.
+## 🚀 Production Deployment Guide
+
+This app deploys as a **single Next.js project to Vercel**. The API routes and frontend are bundled together — no separate backend server is needed.
+
+### Prerequisites
+
+- [Vercel account](https://vercel.com) (free tier works)
+- [MongoDB Atlas account](https://www.mongodb.com/cloud/atlas) (free M0 cluster)
+- [Clerk account](https://clerk.com) (free tier works)
+- GitHub repository with this code
 
 ---
 
-**Built with ❤️ using Next.js, MongoDB, and OpenAI**
+### Step 1 — MongoDB Atlas
 
+1. Go to [cloud.mongodb.com](https://cloud.mongodb.com) and create a free **M0 cluster**
+2. Click **Database Access** → Add a database user with a strong password
+3. Click **Network Access** → Add IP `0.0.0.0/0` (allow all — Vercel uses dynamic IPs)
+4. Click **Connect** → **Connect your application** → copy the connection string:
+   ```
+   mongodb+srv://<username>:<password>@<cluster>.mongodb.net/ai_second_brain?retryWrites=true&w=majority
+   ```
+5. Save this as your `MONGODB_URI`
+
+---
+
+### Step 2 — Clerk Authentication
+
+1. Go to [dashboard.clerk.com](https://dashboard.clerk.com) and create a new application
+2. Choose your sign-in methods (Email, Google, GitHub, etc.)
+3. In **API Keys**, copy:
+   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` → starts with `pk_live_` or `pk_test_`
+   - `CLERK_SECRET_KEY` → starts with `sk_live_` or `sk_test_`
+4. In **Paths** settings, configure:
+   - Sign-in URL: `/sign-in`
+   - Sign-up URL: `/sign-up`
+   - After sign-in: `/`
+   - After sign-up: `/`
+
+---
+
+### Step 3 — Deploy to Vercel
+
+1. Push your code to a GitHub repository
+2. Go to [vercel.com/new](https://vercel.com/new) and import your repo
+3. Vercel auto-detects Next.js — keep default settings
+4. Add all **Environment Variables** in the Vercel dashboard:
+
+   | Variable | Value |
+   |---|---|
+   | `MONGODB_URI` | Your Atlas connection string |
+   | `DB_NAME` | `ai_second_brain` |
+   | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | From Clerk dashboard |
+   | `CLERK_SECRET_KEY` | From Clerk dashboard |
+   | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` |
+   | `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` |
+   | `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | `/` |
+   | `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | `/` |
+   | `NEXT_PUBLIC_BASE_URL` | Your Vercel app URL (e.g. `https://yourapp.vercel.app`) |
+   | `CORS_ORIGINS` | Your Vercel app URL |
+
+5. Click **Deploy**
+
+---
+
+### Step 4 — Configure Clerk Allowed Origins
+
+After deploying, go back to Clerk Dashboard:
+1. **Domains** → Add your Vercel production URL (e.g. `https://yourapp.vercel.app`)
+2. This allows Clerk to issue tokens for your production domain
+
+---
+
+### Local Development with Auth
+
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+2. Fill in your Clerk test keys (from Clerk dashboard → Development instance)
+3. Keep `MONGO_URL=mongodb://localhost:27017` for local DB
+4. Run:
+   ```bash
+   yarn dev
+   ```
+
+> **Note:** The first time you visit `http://localhost:3000` after adding Clerk keys, you'll be redirected to sign in. Create an account — each user gets their own private vault.
+
+---
+
+**Built with ❤️ using Next.js, MongoDB, and Clerk**
