@@ -7,10 +7,12 @@ import { UserButton, SignInButton, useAuth } from '@clerk/nextjs';
 // Process env is inlined at build time by Next.js (NEXT_PUBLIC_ vars only)
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-export function ClerkUserButton() {
+// Inner components — only rendered when ClerkProvider is present.
+// useAuth() MUST NOT be called outside of <ClerkProvider>, so these inner
+// components are only mounted when HAS_CLERK is true (layout.js wraps
+// the whole tree with ClerkProvider in that case).
+function UserButtonInner() {
     const { isSignedIn } = useAuth();
-    // Render nothing if Clerk is not configured yet (local dev without keys)
-    if (!HAS_CLERK) return null;
     if (!isSignedIn) return null;
     return (
         <UserButton
@@ -24,9 +26,8 @@ export function ClerkUserButton() {
     );
 }
 
-export function ClerkSignInButton() {
+function SignInButtonInner() {
     const { isSignedIn } = useAuth();
-    if (!HAS_CLERK) return null;
     if (isSignedIn) return null;
     return (
         <SignInButton mode="modal">
@@ -35,4 +36,14 @@ export function ClerkSignInButton() {
             </button>
         </SignInButton>
     );
+}
+
+export function ClerkUserButton() {
+    if (!HAS_CLERK) return null;
+    return <UserButtonInner />;
+}
+
+export function ClerkSignInButton() {
+    if (!HAS_CLERK) return null;
+    return <SignInButtonInner />;
 }

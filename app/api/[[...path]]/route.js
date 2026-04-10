@@ -6,18 +6,21 @@ import { auth } from '@clerk/nextjs/server';
 
 // ─── MongoDB ───────────────────────────────────────────────────────────────────
 // Supports both local MONGO_URL and production MONGODB_URI (Atlas)
-const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
-// Serverless-friendly connection options (short timeouts, small pool)
-const client = new MongoClient(MONGO_URI, {
-    serverSelectionTimeoutMS: 5000,
-    connectTimeoutMS: 5000,
-    maxPoolSize: 10,
-});
 const dbName = process.env.DB_NAME || 'ai_second_brain';
+let client;
 let db;
 
 async function connectDB() {
     if (!db) {
+        const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
+        if (!MONGO_URI) throw new Error('No MongoDB URI configured. Set MONGODB_URI in environment variables.');
+        if (!client) {
+            client = new MongoClient(MONGO_URI, {
+                serverSelectionTimeoutMS: 5000,
+                connectTimeoutMS: 5000,
+                maxPoolSize: 10,
+            });
+        }
         await client.connect();
         db = client.db(dbName);
         await db.collection('conversations').createIndex({ userId: 1, createdAt: -1 });
@@ -428,14 +431,17 @@ export async function GET(request) {
             const q = url.searchParams.get('q') || '';
             if (!q.trim()) return NextResponse.json({ conversations: [] });
 
+            // Escape user input to prevent ReDoS attacks via malicious regex patterns
+            const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
             const matchingMsgs = await db.collection('messages')
-                .find({ content: { $regex: q, $options: 'i' } })
+                .find({ content: { $regex: escapedQ, $options: 'i' } })
                 .toArray();
 
             const conversationIds = [...new Set(matchingMsgs.map(m => m.conversationId))];
 
             const titleMatches = await db.collection('conversations')
-                .find({ userId, title: { $regex: q, $options: 'i' } })
+                .find({ userId, title: { $regex: escapedQ, $options: 'i' } })
                 .toArray();
 
             const allIds = [...new Set([...conversationIds, ...titleMatches.map(c => c.id)])];
@@ -482,6 +488,19 @@ export async function PATCH(request) {
         console.error('API Error:', error);
         return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
     }
+}
+
+// ─── OPTIONS handler (CORS preflight) ─────────────────────────────────────────
+export async function OPTIONS() {
+    return new Response(null, {
+        status: 204,
+        headers: {
+            'Access-Control-Allow-Origin': process.env.NEXT_PUBLIC_BASE_URL || '*',
+            'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Max-Age': '86400',
+        },
+    });
 }
 
 // ─── DELETE handler ────────────────────────────────────────────────────────────

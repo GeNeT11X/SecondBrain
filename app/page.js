@@ -571,19 +571,6 @@ export default function App() {
                 onToggleImportant={handleToggleImportant}
                 onDelete={handleDelete}
             />
-
-            <style jsx global>{`
-                @keyframes blob {
-                    0%   { transform: translate(0,0) scale(1); }
-                    33%  { transform: translate(30px,-50px) scale(1.1); }
-                    66%  { transform: translate(-20px,20px) scale(0.9); }
-                    100% { transform: translate(0,0) scale(1); }
-                }
-                .animate-blob { animation: blob 8s infinite; }
-                .animation-delay-2000 { animation-delay: 2s; }
-                .animation-delay-4000 { animation-delay: 4s; }
-                .bg-white\/8 { background-color: rgba(255,255,255,0.08); }
-            `}</style>
         </div>
     );
 }
