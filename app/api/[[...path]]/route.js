@@ -7,27 +7,42 @@ import { auth } from '@clerk/nextjs/server';
 // ─── MongoDB ───────────────────────────────────────────────────────────────────
 // Supports both local MONGO_URL and production MONGODB_URI (Atlas)
 const dbName = process.env.DB_NAME || 'ai_second_brain';
-let client;
-let db;
+
+// Global caching: survives across hot reloads (dev) and warm serverless invocations (prod).
+// Without this, every cold start opens a new connection and Vercel exhaust Atlas's pool.
+const _g = global;
+if (!_g._mongo) _g._mongo = { client: null, db: null, indexed: false };
 
 async function connectDB() {
-    if (!db) {
-        const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
-        if (!MONGO_URI) throw new Error('No MongoDB URI configured. Set MONGODB_URI in environment variables.');
-        if (!client) {
-            client = new MongoClient(MONGO_URI, {
-                serverSelectionTimeoutMS: 5000,
-                connectTimeoutMS: 5000,
-                maxPoolSize: 10,
-            });
-        }
-        await client.connect();
-        db = client.db(dbName);
-        await db.collection('conversations').createIndex({ userId: 1, createdAt: -1 });
-        await db.collection('conversations').createIndex({ userId: 1, isImportant: 1 });
-        await db.collection('messages').createIndex({ conversationId: 1, messageOrder: 1 });
+    if (_g._mongo.db) return _g._mongo.db;
+
+    const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
+    if (!MONGO_URI) throw new Error('No MongoDB URI configured. Set MONGODB_URI in environment variables.');
+
+    if (!_g._mongo.client) {
+        _g._mongo.client = new MongoClient(MONGO_URI, {
+            serverSelectionTimeoutMS: 5000,
+            connectTimeoutMS: 5000,
+            maxPoolSize: 5, // keep low — each Vercel serverless instance is single-threaded
+        });
     }
-    return db;
+
+    await _g._mongo.client.connect();
+    _g._mongo.db = _g._mongo.client.db(dbName);
+
+    if (!_g._mongo.indexed) {
+        const conv = _g._mongo.db.collection('conversations');
+        const msgs = _g._mongo.db.collection('messages');
+        await Promise.all([
+            conv.createIndex({ userId: 1, createdAt: -1 }),
+            conv.createIndex({ userId: 1, isImportant: 1 }),
+            conv.createIndex({ userId: 1, sourceUrl: 1 }), // for duplicate-URL detection
+            msgs.createIndex({ conversationId: 1, messageOrder: 1 }),
+        ]);
+        _g._mongo.indexed = true;
+    }
+
+    return _g._mongo.db;
 }
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -343,6 +358,15 @@ export async function POST(request) {
                 return NextResponse.json({ error: 'ChatGPT URL is required' }, { status: 400 });
             }
 
+            // Reject duplicate saves for the same user
+            const existing = await db.collection('conversations').findOne({ userId, sourceUrl: chatUrl });
+            if (existing) {
+                return NextResponse.json(
+                    { error: 'You have already saved this conversation.', conversation: existing },
+                    { status: 409 }
+                );
+            }
+
             const rawMessages = await fetchRawMessages(chatUrl);
             if (!rawMessages || rawMessages.length === 0) {
                 return NextResponse.json({
@@ -434,17 +458,26 @@ export async function GET(request) {
             // Escape user input to prevent ReDoS attacks via malicious regex patterns
             const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-            const matchingMsgs = await db.collection('messages')
-                .find({ content: { $regex: escapedQ, $options: 'i' } })
+            // Fetch this user's conversation IDs first so message search is scoped to them only.
+            // Without this, the message query scans the entire collection across all users.
+            const userConvs = await db.collection('conversations')
+                .find({ userId }, { projection: { id: 1 } })
                 .toArray();
+            const userConvIds = userConvs.map(c => c.id);
 
-            const conversationIds = [...new Set(matchingMsgs.map(m => m.conversationId))];
+            const [matchingMsgs, titleMatches] = await Promise.all([
+                db.collection('messages')
+                    .find({ conversationId: { $in: userConvIds }, content: { $regex: escapedQ, $options: 'i' } })
+                    .toArray(),
+                db.collection('conversations')
+                    .find({ userId, title: { $regex: escapedQ, $options: 'i' } })
+                    .toArray(),
+            ]);
 
-            const titleMatches = await db.collection('conversations')
-                .find({ userId, title: { $regex: escapedQ, $options: 'i' } })
-                .toArray();
-
-            const allIds = [...new Set([...conversationIds, ...titleMatches.map(c => c.id)])];
+            const allIds = [...new Set([
+                ...matchingMsgs.map(m => m.conversationId),
+                ...titleMatches.map(c => c.id),
+            ])];
 
             const conversations = await db.collection('conversations')
                 .find({ id: { $in: allIds }, userId })
