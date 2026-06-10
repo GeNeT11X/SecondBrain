@@ -1,282 +1,195 @@
-# AI Second Brain for ChatGPT 🧠✨
+# SecondBrain 🧠
 
-A production-ready SaaS application that helps you organize, summarize, and search your ChatGPT conversations automatically. Build your personal knowledge base from your AI chats.
+**Never lose a great ChatGPT conversation again.**
 
+SecondBrain is a production-ready SaaS app that archives your ChatGPT conversations into a private, searchable vault. Paste a public share link once — the full conversation is saved forever, even if the original link expires or is deleted.
+
+Runs entirely on **free tiers**: Vercel (hosting) + MongoDB Atlas (database) + Clerk (authentication). $0/month.
+
+---
+
+## ✨ Features
+
+- **Archive forever** — paste a `chatgpt.com/share/...` link and every message is extracted and stored exactly as it was
+- **Multi-user accounts** — Clerk authentication (email, Google, GitHub, …); every user gets a private vault
+- **Full-text search** — search across every message and title in your vault
+- **Tags** — organize conversations with custom tags and filter your vault by tag with one click
+- **Important ⭐** — star conversations that matter and keep them one tab away
+- **Export to Markdown** — download any conversation as a clean `.md` file (Obsidian/Notion-friendly)
+- **Modern landing page** — logged-out visitors see a marketing page with sign-up CTAs
+- **Modern UI** — dark glassmorphic design, responsive grid, smooth animations, toast feedback
+- **Hardened API** — per-user data isolation, rate limiting, duplicate detection, regex-injection protection, security headers
+
+## 🏗️ Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 14 (App Router, single project — frontend + API routes) |
+| UI | React 18, Tailwind CSS, shadcn/ui, lucide-react |
+| Database | MongoDB (Atlas M0 free tier in production) |
+| Auth | Clerk (free tier) |
+| Hosting | Vercel (free tier) |
+
+## 📁 Project Structure
+
+```
+├── app/
+│   ├── api/[[...path]]/route.js   # All API endpoints (catch-all route)
+│   ├── page.js                    # Auth gate: landing (logged out) vs vault (signed in)
+│   ├── layout.js                  # Root layout + SEO metadata + ClerkProvider
+│   ├── sign-in/ · sign-up/        # Clerk auth pages
+│   └── globals.css                # Global styles + animations
+├── components/
+│   ├── vault.jsx                  # Main app (save, search, tags, export, …)
+│   ├── landing.jsx                # Marketing page for logged-out visitors
+│   ├── clerk-user-button.jsx      # Clerk UI client boundary
+│   └── ui/                        # shadcn components
+├── middleware.js                  # Clerk route protection
+├── next.config.js                 # Security + CORS headers
+└── vercel.json                    # Function timeout config
+```
+
+## 🔌 API Endpoints
+
+All endpoints require authentication (Clerk session). Every query is scoped to the signed-in user.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/save-chat` | Parse a ChatGPT share link and archive it. Body: `{ chatUrl }`. Rate-limited (10/min), rejects duplicates. |
+| `GET` | `/api/conversations?page=&limit=&tag=` | List conversations (paginated, optional tag filter) |
+| `GET` | `/api/conversations/:id` | Single conversation + all messages |
+| `GET` | `/api/search?q=` | Full-text search across titles and message content |
+| `GET` | `/api/tags` | All tags for the user, with usage counts |
+| `PATCH` | `/api/conversations/:id/important` | Toggle the ⭐ flag |
+| `PATCH` | `/api/conversations/:id/tags` | Replace tags. Body: `{ tags: string[] }` (max 10, 30 chars each) |
+| `DELETE` | `/api/conversations/:id` | Delete a conversation and its messages |
+
+---
+
+## 🚀 Local Development
 
 ### Prerequisites
 
-- MongoDB instance (local or cloud)
+- Node.js 18+ and Yarn
+- A MongoDB instance — local (`mongodb://localhost:27017`) or an Atlas cluster
+- (Optional) Clerk keys — without them the app runs in single-user "no-auth" mode
 
-### Installation
+### Setup
 
-1. **Install dependencies**:
 ```bash
+# 1. Install dependencies
 yarn install
-```
 
-2. **Configure environment variables** (`.env`):
-```env
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=ai_second_brain
-OPENAI_API_KEY=your_openai_api_key_here
-NEXT_PUBLIC_BASE_URL=your_app_url
-```
+# 2. Configure environment
+cp .env.example .env
+# → fill in MONGODB_URI (or keep MONGO_URL=mongodb://localhost:27017)
+# → optionally add Clerk test keys for the full auth experience
 
-3. **Start the development server**:
-```bash
+# 3. Run
 yarn dev
 ```
 
-4. **Access the application**:
-Open [http://localhost:3000](http://localhost:3000) in your browser
+Open [http://localhost:3000](http://localhost:3000).
 
-## 📖 How to Use
-
-### Adding a ChatGPT Conversation
-
-1. **Create a share link** from ChatGPT:
-   - Open any ChatGPT conversation
-   - Click the share button (↗️) in the top right
-   - Copy the share link (format: `https://chatgpt.com/share/...`)
-
-2. **Paste the link** into the AI Second Brain:
-   - Go to the "Add ChatGPT Conversation" section
-   - Paste your share link
-   - Click "Analyze" button
-
-3. **AI processes your conversation**:
-   - Extracts all messages
-   - Generates title, summary, insights, and tags
-   - Creates vector embeddings for semantic search
-   - Saves to your knowledge base
-
-### Searching Your Knowledge
-
-**Keyword Search**:
-- Type any text in the search bar
-- Searches through titles, summaries, tags, and insights
-- Real-time filtering as you type
-
-**Semantic Search**:
-- Click "Keyword" button to switch to "Semantic" mode
-- Enter your query describing what you're looking for
-- AI finds conceptually similar notes, not just keyword matches
-- Example: Search "authentication best practices" to find notes about security, JWT, OAuth, etc.
-
-### Organizing Notes
-
-- **Filter by Tags**: Click tag tabs to view notes by category
-- **View Details**: Click any note card to see full details
-- **Delete Notes**: Open note details and click "Delete Note"
-
-## 🏗️ Architecture
-
-### Tech Stack
-- **Frontend**: Next.js 14, React, Tailwind CSS, shadcn/ui
-- **Backend**: Next.js API Routes
-- **Database**: MongoDB
-- **AI/ML**: OpenAI GPT-4-turbo, text-embedding-3-small
-- **Styling**: Tailwind CSS with custom glassmorphic design
-
-### Project Structure
-```
-/app
-├── app/
-│   ├── api/[[...path]]/route.js   # Backend API (all endpoints)
-│   ├── page.js                    # Frontend UI (main app)
-│   ├── layout.js                  # Root layout
-│   └── globals.css                # Global styles
-├── components/ui/                 # shadcn UI components
-├── lib/                          # Utility functions
-├── tests/                        # Test files
-└── .env                          # Environment variables
-```
-
-### API Endpoints
-
-**POST /api/chat/parse**
-- Parse ChatGPT share link and create note
-- Body: `{ chatUrl: string }`
-- Returns: Created note with AI analysis
-
-**GET /api/notes**
-- Retrieve all notes for user
-- Returns: Array of notes
-
-**GET /api/notes/:id**
-- Get single note by ID
-- Returns: Note object
-
-**POST /api/notes/search**
-- Search notes (keyword or semantic)
-- Body: `{ query: string, searchType: 'keyword' | 'semantic' }`
-- Returns: Array of matching notes
-
-**GET /api/tags**
-- Get all unique tags
-- Returns: Array of tag strings
-
-**DELETE /api/notes/:id**
-- Delete a note
-- Returns: Success status
-
-## 🎨 UI Features
-
-- **Glassmorphic Design**: Modern frosted glass effect with backdrop blur
-- **Gradient Accents**: Beautiful blue-to-indigo gradients
-- **Responsive Grid**: Adapts to mobile, tablet, and desktop
-- **Smooth Animations**: Hover effects and transitions
-- **Modal Details**: Full-screen note viewer with scrollable content
-- **Toast Notifications**: User feedback for all actions
-- **Dark Mode Ready**: Prepared for dark theme switching
-
-## 🧪 Testing
-
-Run the test suite:
-
-```bash
-# Test basic API connectivity
-node tests/test_chat_parser.js
-
-# Test full workflow (CRUD operations)
-node tests/test_full_workflow.js
-```
-
-## 🔧 Development Notes
-
-### ChatGPT Link Parsing
-The parser extracts conversations from ChatGPT share links by:
-1. Fetching the HTML page
-2. Parsing `__NEXT_DATA__` JSON from the page
-3. Extracting message nodes from the conversation mapping
-4. Cleaning and structuring the dialogue
-
-### Vector Search Implementation
-- Uses OpenAI's `text-embedding-3-small` model (1536 dimensions)
-- Stores embeddings alongside notes in MongoDB
-- Calculates cosine similarity for semantic matching
-- Returns results with similarity scores
-
-### AI Analysis
-GPT-4-turbo analyzes conversations with structured JSON output:
-- Generates concise, meaningful titles
-- Creates 2-3 sentence summaries
-- Extracts 3-5 key insights
-- Suggests relevant tags
-- Identifies and extracts code snippets
-
-## 📝 Future Enhancements
-
-Planned features for future versions:
-- [ ] User authentication (multi-user support)
-- [ ] Stripe subscription system
-- [ ] Export notes to Markdown/PDF
-- [ ] Folder organization
-- [ ] Note linking and relationships
-- [ ] Browser extension for one-click saving
-- [ ] Collaborative knowledge bases
-- [ ] Advanced ChromaDB integration
-- [ ] Custom AI analysis prompts
-- [ ] Mobile app (React Native)
-
-## 🤝 Contributing
-
-This is an MVP version. Contributions welcome!
-
-## 📄 License
-
-MIT License - feel free to use for your own projects
+> Without Clerk keys, the vault opens directly with a fixed local user — handy for quick hacking. With Clerk keys, you get the real landing page → sign up → private vault flow.
 
 ---
 
-## 🚀 Production Deployment Guide
+## 🌍 Production Deployment (100% free tier)
 
-This app deploys as a **single Next.js project to Vercel**. The API routes and frontend are bundled together — no separate backend server is needed.
+The app deploys as a **single Next.js project on Vercel** — API routes and frontend are bundled together; no separate backend server.
 
-### Prerequisites
+### Step 1 — MongoDB Atlas (free M0 cluster)
 
-- [Vercel account](https://vercel.com) (free tier works)
-- [MongoDB Atlas account](https://www.mongodb.com/cloud/atlas) (free M0 cluster)
-- [Clerk account](https://clerk.com) (free tier works)
-- GitHub repository with this code
-
----
-
-### Step 1 — MongoDB Atlas
-
-1. Go to [cloud.mongodb.com](https://cloud.mongodb.com) and create a free **M0 cluster**
-2. Click **Database Access** → Add a database user with a strong password
-3. Click **Network Access** → Add IP `0.0.0.0/0` (allow all — Vercel uses dynamic IPs)
-4. Click **Connect** → **Connect your application** → copy the connection string:
+1. Go to [cloud.mongodb.com](https://cloud.mongodb.com) → create a free **M0 cluster**
+2. **Database Access** → add a database user with a strong password
+3. **Network Access** → add IP `0.0.0.0/0` (Vercel uses dynamic IPs)
+4. **Connect → Drivers** → copy the connection string:
    ```
-   mongodb+srv://<username>:<password>@<cluster>.mongodb.net/ai_second_brain?retryWrites=true&w=majority
+   mongodb+srv://<user>:<password>@<cluster>.mongodb.net/ai_second_brain?retryWrites=true&w=majority
    ```
-5. Save this as your `MONGODB_URI`
+   This is your `MONGODB_URI`.
 
----
+### Step 2 — Clerk (free tier)
 
-### Step 2 — Clerk Authentication
-
-1. Go to [dashboard.clerk.com](https://dashboard.clerk.com) and create a new application
-2. Choose your sign-in methods (Email, Google, GitHub, etc.)
-3. In **API Keys**, copy:
-   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` → starts with `pk_live_` or `pk_test_`
-   - `CLERK_SECRET_KEY` → starts with `sk_live_` or `sk_test_`
-4. In **Paths** settings, configure:
-   - Sign-in URL: `/sign-in`
-   - Sign-up URL: `/sign-up`
-   - After sign-in: `/`
-   - After sign-up: `/`
-
----
+1. Go to [dashboard.clerk.com](https://dashboard.clerk.com) → create an application
+2. Choose sign-in methods (Email, Google, GitHub, …)
+3. From **API Keys**, copy:
+   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (`pk_live_…` / `pk_test_…`)
+   - `CLERK_SECRET_KEY` (`sk_live_…` / `sk_test_…`)
 
 ### Step 3 — Deploy to Vercel
 
-1. Push your code to a GitHub repository
-2. Go to [vercel.com/new](https://vercel.com/new) and import your repo
-3. Vercel auto-detects Next.js — keep default settings
-4. Add all **Environment Variables** in the Vercel dashboard:
+1. Push this repo to GitHub
+2. Go to [vercel.com/new](https://vercel.com/new) → import the repo (Next.js auto-detected)
+3. Add **Environment Variables**:
 
    | Variable | Value |
    |---|---|
-   | `MONGODB_URI` | Your Atlas connection string |
+   | `MONGODB_URI` | Atlas connection string from Step 1 |
    | `DB_NAME` | `ai_second_brain` |
-   | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | From Clerk dashboard |
-   | `CLERK_SECRET_KEY` | From Clerk dashboard |
+   | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | from Clerk |
+   | `CLERK_SECRET_KEY` | from Clerk |
    | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` |
    | `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` |
    | `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | `/` |
    | `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | `/` |
-   | `NEXT_PUBLIC_BASE_URL` | Your Vercel app URL (e.g. `https://yourapp.vercel.app`) |
-   | `CORS_ORIGINS` | Your Vercel app URL |
+   | `NEXT_PUBLIC_BASE_URL` | your domain, e.g. `https://yourdomain.com` (use the `*.vercel.app` URL until your domain is connected) |
 
-5. Click **Deploy**
+4. Click **Deploy**
 
----
+### Step 4 — Connect your custom domain
 
-### Step 4 — Configure Clerk Allowed Origins
+1. Vercel → your project → **Settings → Domains** → add `yourdomain.com`
+2. At your domain registrar, add the DNS records Vercel shows you
+   (usually an `A` record to `76.76.21.21` and a `CNAME` for `www` → `cname.vercel-dns.com`)
+3. Wait for DNS to propagate — Vercel provisions HTTPS automatically
+4. Update `NEXT_PUBLIC_BASE_URL` in Vercel env vars to `https://yourdomain.com` and **redeploy**
 
-After deploying, go back to Clerk Dashboard:
-1. **Domains** → Add your Vercel production URL (e.g. `https://yourapp.vercel.app`)
-2. This allows Clerk to issue tokens for your production domain
+### Step 5 — Tell Clerk about the domain
 
----
+In the Clerk Dashboard:
+1. **Domains** → add your production domain (`https://yourdomain.com`)
+2. For a `pk_live_` production instance, follow Clerk's DNS verification steps
+3. **Paths**: sign-in `/sign-in`, sign-up `/sign-up`, after both → `/`
 
-### Local Development with Auth
-
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-2. Fill in your Clerk test keys (from Clerk dashboard → Development instance)
-3. Keep `MONGO_URL=mongodb://localhost:27017` for local DB
-4. Run:
-   ```bash
-   yarn dev
-   ```
-
-> **Note:** The first time you visit `http://localhost:3000` after adding Clerk keys, you'll be redirected to sign in. Create an account — each user gets their own private vault.
+Done — visit your domain. Logged-out visitors get the landing page; signing up creates a private vault.
 
 ---
 
-**Built with ❤️ using Next.js, MongoDB, and Clerk**
+## 🔧 How It Works
+
+### ChatGPT link parsing
+`POST /api/save-chat` extracts conversations with a multi-strategy fallback chain:
+1. ChatGPT's share JSON API endpoints (`backend-anon` / `backend-api`)
+2. Embedded `__NEXT_DATA__` JSON in the share page HTML
+3. RSC streaming chunks / inline script JSON scanning
+4. DOM scraping (`data-message-author-role`, `<article>` elements)
+
+### Data model
+Two collections, both indexed per user:
+- `conversations` — `{ id, userId, title, sourceUrl, tags[], isImportant, messageCount, createdAt }`
+- `messages` — `{ id, conversationId, role, content, messageOrder, createdAt }`
+
+### Security
+- All API routes require a Clerk session in production (401 otherwise)
+- Every DB query is scoped by `userId` — users can never see each other's data
+- Save endpoint rate-limited (10/min/user) with duplicate-URL rejection
+- Search input is regex-escaped (ReDoS protection); tags are normalized and capped
+- Security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`) + CORS scoped to your domain
+
+## 📝 Roadmap Ideas
+
+- [ ] Export entire vault as a zip of Markdown files
+- [ ] Support Claude / Gemini share links
+- [ ] Browser extension for one-click saving
+- [ ] Folders & note linking
+- [ ] Optional AI summaries and semantic search
+
+## 📄 License
+
+MIT — free to use for your own projects.
+
+---
+
+**Built with Next.js, MongoDB, Clerk & Vercel — runs on $0/month.**

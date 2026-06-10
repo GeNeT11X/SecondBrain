@@ -37,6 +37,7 @@ async function connectDB() {
             conv.createIndex({ userId: 1, createdAt: -1 }),
             conv.createIndex({ userId: 1, isImportant: 1 }),
             conv.createIndex({ userId: 1, sourceUrl: 1 }), // for duplicate-URL detection
+            conv.createIndex({ userId: 1, tags: 1 }),
             msgs.createIndex({ conversationId: 1, messageOrder: 1 }),
         ]);
         _g._mongo.indexed = true;
@@ -329,6 +330,16 @@ async function fetchRawMessages(url) {
     return null;
 }
 
+/** Normalize a user-supplied tags array: trim, lowercase, dedupe, cap length/count */
+function normalizeTags(tags) {
+    if (!Array.isArray(tags)) return [];
+    const cleaned = tags
+        .filter(t => typeof t === 'string')
+        .map(t => t.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 30))
+        .filter(Boolean);
+    return [...new Set(cleaned)].slice(0, 10);
+}
+
 function deriveTitle(messages) {
     const first = messages.find(m => m.role === 'user');
     if (!first) return 'Untitled Conversation';
@@ -384,6 +395,7 @@ export async function POST(request) {
                 title,
                 sourceUrl: chatUrl,
                 isImportant: false,
+                tags: [],
                 messageCount: rawMessages.length,
                 createdAt: now,
             };
@@ -424,18 +436,32 @@ export async function GET(request) {
             const page = parseInt(url.searchParams.get('page') || '1');
             const limit = parseInt(url.searchParams.get('limit') || '20');
             const skip = (page - 1) * limit;
+            const tag = (url.searchParams.get('tag') || '').trim().toLowerCase();
 
+            const query = tag ? { userId, tags: tag } : { userId };
             const [conversations, total] = await Promise.all([
                 db.collection('conversations')
-                    .find({ userId })
+                    .find(query)
                     .sort({ createdAt: -1 })
                     .skip(skip)
                     .limit(limit)
                     .toArray(),
-                db.collection('conversations').countDocuments({ userId })
+                db.collection('conversations').countDocuments(query)
             ]);
 
             return NextResponse.json({ conversations, total, page, limit });
+        }
+
+        if (path === 'tags') {
+            // Unique tags for this user with usage counts, most-used first
+            const tags = await db.collection('conversations').aggregate([
+                { $match: { userId, tags: { $exists: true, $ne: [] } } },
+                { $unwind: '$tags' },
+                { $group: { _id: '$tags', count: { $sum: 1 } } },
+                { $sort: { count: -1, _id: 1 } },
+                { $project: { _id: 0, tag: '$_id', count: 1 } },
+            ]).toArray();
+            return NextResponse.json({ tags });
         }
 
         if (path.startsWith('conversations/')) {
@@ -513,6 +539,17 @@ export async function PATCH(request) {
             const newValue = !conversation.isImportant;
             await db.collection('conversations').updateOne({ id: convId, userId }, { $set: { isImportant: newValue } });
             return NextResponse.json({ success: true, isImportant: newValue });
+        }
+
+        if (path.match(/^conversations\/[^/]+\/tags$/)) {
+            const convId = path.replace('conversations/', '').replace('/tags', '');
+            const conversation = await db.collection('conversations').findOne({ id: convId, userId });
+            if (!conversation) return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+
+            const body = await request.json();
+            const tags = normalizeTags(body.tags);
+            await db.collection('conversations').updateOne({ id: convId, userId }, { $set: { tags } });
+            return NextResponse.json({ success: true, tags });
         }
 
         return NextResponse.json({ error: 'Invalid endpoint' }, { status: 404 });
