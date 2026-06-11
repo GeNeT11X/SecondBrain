@@ -573,7 +573,7 @@ export default function Vault() {
                             </div>
                             <div>
                                 <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
-                                    SecondBrain
+                                    TwoBrain
                                 </h1>
                                 <p className="text-xs text-slate-400">Your personal conversation archive</p>
                             </div>

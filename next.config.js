@@ -28,7 +28,7 @@ const nextConfig = {
         pagesBufferLength: 2,
     },
     async headers() {
-        const frontendUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://secondbrain.vercel.app';
+        const frontendUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.twobrain.in';
         return [
             {
                 // Security headers for all routes

@@ -52,7 +52,7 @@ const STEPS = [
         icon: Archive,
         step: '02',
         title: 'Paste & save',
-        desc: 'Drop the link into SecondBrain. We extract and archive every message exactly as it was.',
+        desc: 'Drop the link into TwoBrain. We extract and archive every message exactly as it was.',
     },
     {
         icon: Sparkles,
@@ -91,7 +91,7 @@ export default function Landing() {
                             <Archive className="h-5 w-5 text-white" />
                         </div>
                         <span className="text-xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
-                            SecondBrain
+                            TwoBrain
                         </span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -118,7 +118,7 @@ export default function Landing() {
                     </span>
                 </h1>
                 <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-                    SecondBrain archives your ChatGPT chats into a private, searchable vault.
+                    TwoBrain archives your ChatGPT chats into a private, searchable vault.
                     Paste a share link once — search, tag, and export it forever.
                 </p>
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -207,10 +207,10 @@ export default function Landing() {
                 <div className="container mx-auto px-4 py-8 max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-4">
                     <div className="flex items-center gap-2 text-slate-500 text-sm">
                         <Archive className="h-4 w-4" />
-                        <span>SecondBrain — your personal conversation archive</span>
+                        <span>TwoBrain — your personal conversation archive</span>
                     </div>
                     <div className="text-xs text-slate-600">
-                        © {new Date().getFullYear()} SecondBrain. Built with Next.js & MongoDB.
+                        © {new Date().getFullYear()} TwoBrain. Built with Next.js & MongoDB.
                     </div>
                 </div>
             </footer>

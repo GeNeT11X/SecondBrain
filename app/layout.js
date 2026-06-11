@@ -9,21 +9,21 @@ const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 export const metadata = {
     metadataBase: new URL(BASE_URL),
     title: {
-        default: 'SecondBrain — Never lose a ChatGPT conversation again',
-        template: '%s · SecondBrain',
+        default: 'TwoBrain — Never lose a ChatGPT conversation again',
+        template: '%s · TwoBrain',
     },
     description: 'Archive your ChatGPT conversations into a private, searchable vault. Paste a share link once — search, tag, star, and export it forever.',
     keywords: ['ChatGPT', 'archive', 'second brain', 'knowledge base', 'AI conversations', 'export', 'search'],
     openGraph: {
-        title: 'SecondBrain — Never lose a ChatGPT conversation again',
+        title: 'TwoBrain — Never lose a ChatGPT conversation again',
         description: 'Archive your ChatGPT conversations into a private, searchable vault. Search, tag, star, and export them forever.',
         url: BASE_URL,
-        siteName: 'SecondBrain',
+        siteName: 'TwoBrain',
         type: 'website',
     },
     twitter: {
         card: 'summary_large_image',
-        title: 'SecondBrain — Never lose a ChatGPT conversation again',
+        title: 'TwoBrain — Never lose a ChatGPT conversation again',
         description: 'Archive your ChatGPT conversations into a private, searchable vault.',
     },
     robots: { index: true, follow: true },

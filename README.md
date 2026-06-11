@@ -1,8 +1,8 @@
-# SecondBrain 🧠
+# TwoBrain 🧠
 
 **Never lose a great ChatGPT conversation again.**
 
-SecondBrain is a production-ready SaaS app that archives your ChatGPT conversations into a private, searchable vault. Paste a public share link once — the full conversation is saved forever, even if the original link expires or is deleted.
+TwoBrain is a production-ready SaaS app that archives your ChatGPT conversations into a private, searchable vault. Paste a public share link once — the full conversation is saved forever, even if the original link expires or is deleted.
 
 Runs entirely on **free tiers**: Vercel (hosting) + MongoDB Atlas (database) + Clerk (authentication). $0/month.
 
